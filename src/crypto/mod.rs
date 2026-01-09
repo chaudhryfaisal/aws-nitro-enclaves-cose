@@ -20,6 +20,8 @@ pub mod kms;
 mod openssl_pkey;
 #[cfg(feature = "key_tpm")]
 pub mod tpm;
+#[cfg(feature = "key_http")]
+pub mod http;
 
 /// A trait exposing a source of entropy
 pub trait Entropy {
