@@ -34,6 +34,9 @@ pub struct HttpSigningConfig {
     pub client_cert_path: Option<String>,
     /// Optional path to client private key for mTLS
     pub client_key_path: Option<String>,
+    /// Optional path to a trusted CA certificate (PEM) to use for TLS verification.
+    /// Can be supplied via the URL parameter `;ca=/path/to/ca.pem`.
+    pub ca_path: Option<String>,
     /// Request template with {payload} placeholder
     pub request_template: String,
     /// Response template with {signature} placeholder
@@ -84,6 +87,9 @@ impl HttpSigningConfig {
                 "Both client_cert and client_key must be provided for mTLS".to_string(),
             ));
         }
+
+        // Extract CA path from URL param "ca" (if present)
+        let ca_path = params.get("ca").cloned();
 
         // Parse request template (base64 encoded)
         let request_template = match params.get("request_template") {
@@ -143,17 +149,18 @@ impl HttpSigningConfig {
             None => SignatureAlgorithm::ES384,
         };
 
-        // Validate algorithm is ES384 or ES512 (not ES256)
-        if matches!(algorithm, SignatureAlgorithm::ES256) {
-            return Err(CoseError::UnsupportedError(
-                "ES256 is not supported for HTTP signing. Use ES384 or ES512.".to_string(),
-            ));
-        }
+        // // Validate algorithm is ES384 or ES512 (not ES256)
+        // if matches!(algorithm, SignatureAlgorithm::ES256) {
+        //     return Err(CoseError::UnsupportedError(
+        //         "ES256 is not supported for HTTP signing. Use ES384 or ES512.".to_string(),
+        //     ));
+        // }
 
         Ok(HttpSigningConfig {
             url: base_url,
             client_cert_path,
             client_key_path,
+            ca_path,
             request_template,
             response_template,
             algorithm,
@@ -226,6 +233,23 @@ impl HttpSigningKey {
             })?;
 
             builder = builder.identity(identity);
+        }
+
+        // Configure custom root CA if provided via config.ca_path
+        if let Some(ca_path) = &config.ca_path {
+            let ca_pem = fs::read(ca_path).map_err(|e| {
+                CoseError::UnsupportedError(format!(
+                    "Failed to read CA certificate '{}': {}",
+                    ca_path, e
+                ))
+            })?;
+            let cert = reqwest::Certificate::from_pem(&ca_pem).map_err(|e| {
+                CoseError::UnsupportedError(format!(
+                    "Failed to parse CA certificate '{}': {}",
+                    ca_path, e
+                ))
+            })?;
+            builder = builder.add_root_certificate(cert);
         }
 
         builder
@@ -542,5 +566,15 @@ mod tests {
         );
         let result = HttpSigningConfig::parse(&url);
         assert!(result.is_err());
+    }
+
+    #[test]
+    #[ignore = "run manually, requires local server"]
+    fn test_http_signing_key_sign_sha384() {
+        std::env::set_var("RUST_LOG", "trace");
+        let bytes: [u8; 48] = [42, 24, 37, 97, 171, 250, 172, 219, 37, 215, 152, 47, 101, 223, 49, 28, 17, 246, 42, 7, 66, 10, 162, 186, 9, 164, 3, 193, 208, 254, 125, 10, 103, 97, 40, 97, 104, 142, 211, 78, 252, 167, 27, 200, 39, 171, 152, 59, ];
+        let signing_key =
+            HttpSigningKey::new("https://127.0.0.1:8098/v2/core/sign/ecdsa-sha384;algorithm=ES384;ca=root-ca.pem").unwrap();
+        signing_key.sign(&bytes).unwrap();
     }
 }
