@@ -291,15 +291,21 @@ impl CoseSign1 {
         let sig_structure = SigStructure::new_sign1(&protected_bytes, payload)
             .map_err(CoseError::SerializationError)?;
 
-        let struct_digest = H::hash(
-            digest,
-            &sig_structure
-                .as_bytes()
-                .map_err(CoseError::SerializationError)?,
-        )
-        .map_err(|e| CoseError::SignatureError(Box::new(e)))?;
+        let sig_structure_bytes = &sig_structure
+            .as_bytes()
+            .map_err(CoseError::SerializationError)?;
 
-        let signature = key.sign(struct_digest.as_ref())?;
+        let signature = match key.sign_with_digest() {
+            true => {
+                let struct_digest = H::hash(digest, sig_structure_bytes)
+                    .map_err(|e| CoseError::SignatureError(Box::new(e)))?;
+                let digest_bytes: &[u8] = struct_digest.as_ref();
+                key.sign(digest_bytes)?
+            }
+            false => {
+                key.sign(&sig_structure_bytes)?
+            }
+        };
 
         Ok(CoseSign1 {
             protected: ByteBuf::from(protected_bytes),

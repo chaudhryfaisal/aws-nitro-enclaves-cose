@@ -159,6 +159,11 @@ fn merge_ec_signature(bytes_r: &[u8], bytes_s: &[u8], key_length: usize) -> Vec<
 pub trait SigningPrivateKey: SigningPublicKey {
     /// Given a digest, returns a signature
     fn sign(&self, digest: &[u8]) -> Result<Vec<u8>, CoseError>;
+
+    /// supports pre-digest signing
+    fn sign_with_digest(&self) -> bool {
+        true
+    }
 }
 
 /// Values from https://tools.ietf.org/html/rfc8152#section-8.1

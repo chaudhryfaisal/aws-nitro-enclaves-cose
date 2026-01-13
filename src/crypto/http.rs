@@ -43,6 +43,8 @@ pub struct HttpSigningConfig {
     pub response_template: String,
     /// Signing algorithm (ES384 or ES512, defaults to ES384)
     pub algorithm: SignatureAlgorithm,
+    /// Support pre digest values
+    pub pre_digest: bool,
 }
 
 impl HttpSigningConfig {
@@ -149,6 +151,22 @@ impl HttpSigningConfig {
             None => SignatureAlgorithm::ES384,
         };
 
+        // Parse algorithm (defaults to ES384)
+        let pre_digest = match params.get("pre_digest") {
+            Some(pre_digest_str) => {
+                match pre_digest_str.parse::<bool>() {
+                    Ok(resp) => {resp}
+                    Err(err) => {
+                        return Err(CoseError::UnsupportedError(format!(
+                            "Failed to parse pre_digest as bool error {}",
+                            err
+                        )));
+                    }
+                }
+            },
+            None => true,
+        };
+
         // // Validate algorithm is ES384 or ES512 (not ES256)
         // if matches!(algorithm, SignatureAlgorithm::ES256) {
         //     return Err(CoseError::UnsupportedError(
@@ -164,6 +182,7 @@ impl HttpSigningConfig {
             request_template,
             response_template,
             algorithm,
+            pre_digest
         })
     }
 }
@@ -467,6 +486,10 @@ impl SigningPrivateKey for HttpSigningKey {
     /// The signature bytes in raw format (R || S)
     fn sign(&self, digest: &[u8]) -> Result<Vec<u8>, CoseError> {
         self.send_signing_request(digest)
+    }
+
+    fn sign_with_digest(&self) -> bool {
+        self.config.pre_digest
     }
 }
 
