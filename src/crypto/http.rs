@@ -360,7 +360,11 @@ impl HttpSigningKey {
             )))
         })?;
 
-        Ok(signature)
+        // Convert signature (DER/ASN.1 or raw) into raw R||S format expected by library
+        let key_len = self.config.algorithm.key_length();
+        let raw_signature = convert_server_signature(&signature, key_len)?;
+
+        Ok(raw_signature)
     }
 
     /// Extract signature from response using the response template.
@@ -455,6 +459,39 @@ impl HttpSigningKey {
             _ => false,
         }
     }
+}
+
+/// Convert a server-returned signature into raw R||S format (big-endian padded to key_len)
+fn convert_server_signature(sig_bytes: &[u8], key_len: usize) -> Result<Vec<u8>, CoseError> {
+    use openssl::ecdsa::EcdsaSig;
+
+    // Try DER parse first
+    if let Ok(der_sig) = EcdsaSig::from_der(sig_bytes) {
+        let r_vec = der_sig.r().to_vec();
+        let s_vec = der_sig.s().to_vec();
+
+        assert!(r_vec.len() <= key_len);
+        assert!(s_vec.len() <= key_len);
+
+        let mut signature_bytes = vec![0u8; key_len * 2];
+        let offset_r = key_len - r_vec.len();
+        signature_bytes[offset_r..offset_r + r_vec.len()].copy_from_slice(&r_vec);
+        let offset_s = key_len - s_vec.len() + key_len;
+        signature_bytes[offset_s..offset_s + s_vec.len()].copy_from_slice(&s_vec);
+        return Ok(signature_bytes);
+    }
+
+    // If not DER, maybe already raw R||S
+    if sig_bytes.len() == key_len * 2 {
+        return Ok(sig_bytes.to_vec());
+    }
+
+    // As a last resort, try to interpret as ASN.1 DER sequence manually via EcdsaSig::from_der failed;
+    // report unsupported format
+    Err(CoseError::SignatureError(Box::new(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        format!("Unsupported signature format or unexpected length: {} bytes", sig_bytes.len()),
+    ))))
 }
 
 impl SigningPublicKey for HttpSigningKey {
